@@ -52,17 +52,15 @@ namespace Firebolt
                 Environment.Exit(1);
             }
 
-            var filters = new List<IFilter>();
-            var limiters = new List<ICommitLimiter>();
+            var filters = new List<ICommitFilter>();
+            var limiters = new List<ICommitParentFilter>();
 
             // Builtins
             if (subdirectoryFilters.Any())
             {
                 var sdf = new Builtins.SubdirectoryFilter(subdirectoryFilters.ToDictionary(t => t.Item1, t => t.Item2));
                 filters.Add(sdf);
-                limiters.Add(sdf);
             }
-
 
 
             using (var repo = new Repository(@"D:\ANSYSDev\AnsysDevCode\CodeDV"))

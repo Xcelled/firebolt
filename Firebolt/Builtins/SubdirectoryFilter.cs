@@ -7,7 +7,7 @@ using LibGit2Sharp;
 
 namespace Firebolt.Builtins
 {
-    class SubdirectoryFilter : IFilter, ICommitLimiter
+    class SubdirectoryFilter : ICommitFilter
     {
         private Dictionary<string, string> relocations;
         public SubdirectoryFilter(Dictionary<string, string> relocations)
@@ -15,31 +15,8 @@ namespace Firebolt.Builtins
             this.relocations = relocations;
         }
 
-        public IEnumerable<Commit> Limit(IEnumerable<Commit> current)
-        {
-            return current.Where(keepCommit);
-        }
-
-        private bool keepCommit(Commit commit)
-        {
-            var parentsCount = commit.Parents.Count();
-            if (parentsCount > 1)
-            {
-                return true; // Merge commit
-            }
-
-            var q = relocations.Keys.Where(p => commit.Tree[p] != null);
-            if (parentsCount == 1)
-            {
-                var parentTree = commit.Parents.First().Tree;
-                q = q.Where(p => commit.Tree[p] != parentTree[p]);
-            }
-
-            return q.Any();
-        }
-
-        public IEnumerable<CommitMetadata> Run(CommitMetadata commit, Commit original, IRepository repo)
-        {
+		public IEnumerable<FireboltCommit> FilterCommit(FireboltCommit commit, Commit original, IRepository repo)
+		{
             var newTree = new TreeMetadata();
 
             foreach (var rel in relocations)
@@ -52,7 +29,9 @@ namespace Firebolt.Builtins
                 }
             }
 
-            return new CommitMetadata[] { CommitMetadata.From(commit, tree: newTree) };
-        }
-    }
+            if (newTree.EntryNames.Any()) {
+			    yield return FireboltCommit.From(commit, tree: newTree);                
+            }
+		}
+	}
 }

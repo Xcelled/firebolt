@@ -53,6 +53,7 @@
   <ItemGroup>
     <Compile Include="Builtins\SubdirectoryFilter.cs" />
     <Compile Include="RewriteEngine.cs" />
+    <Compile Include="FireboltCommit.cs" />
     <Compile Include="ICommitFilter.cs" />
     <Compile Include="Firebolt.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
