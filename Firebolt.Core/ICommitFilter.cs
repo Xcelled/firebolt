@@ -2,7 +2,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Firebolt
+namespace Firebolt.Core
 {
     public interface ICommitFilter
     {

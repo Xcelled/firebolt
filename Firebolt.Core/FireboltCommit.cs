@@ -6,7 +6,7 @@ using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Firebolt
+namespace Firebolt.Core
 {
     public class TreeMetadata : TreeDefinition
     {

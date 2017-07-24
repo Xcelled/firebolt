@@ -8,9 +8,9 @@ using System.Threading.Tasks;
 
 using CommitSet = System.Collections.Generic.HashSet<LibGit2Sharp.Commit>;
 
-namespace Firebolt
+namespace Firebolt.Core
 {
-	class RewriteEngine
+	public class RewriteEngine
 	{
 		List<ICommitFilter> commitFilters;
 		List<ICommitParentFilter> parentFilters;
@@ -51,12 +51,12 @@ namespace Firebolt
 		private Task<CommitSet> getRewrittenOrOriginalParents(Commit commit)
 		{
 			return Task.WhenAll(commit.Parents.Select(mapToRewrittenOrOriginal))
-					.ContinueWith(t => t.Result.Flatten().ToSet(), TaskContinuationOptions.ExecuteSynchronously);
+					.ContinueWith(t => t.Result.Flatten().ToSet());
 		}
 		private Task<CommitSet> getRewrittenParentsOnly(Commit commit)
 		{
 			return Task.WhenAll(commit.Parents.Select(mapToRewrittenOnly))
-					.ContinueWith(t => t.Result.Flatten().ToSet(), TaskContinuationOptions.ExecuteSynchronously);
+					.ContinueWith(t => t.Result.Flatten().ToSet());
 		}
 
 		private Task<CommitSet> mapToRewrittenOrOriginal(Commit commit)
@@ -77,21 +77,20 @@ namespace Firebolt
 
 		private Task<CommitSet> rewrite(Commit originalCommit)
 		{
-			var loadParentsTask = getRewrittenOrOriginalParents(originalCommit);
-
 			var original = FireboltCommit.From(originalCommit);
 			var originalTreeMetadata = original.Tree;
 
 			var filterCommitTask = Task.Run(() => filterCommit(original, originalCommit));
+			var loadParentsTask = getRewrittenOrOriginalParents(originalCommit);
 
 			var reparentTask = Task.WhenAll(loadParentsTask, filterCommitTask)
-				.ContinueWith(t => filterCommitTask.Result.Select(c => FireboltCommit.From(c, parents: loadParentsTask.Result)).ToSet());
+				.ContinueWith(t => filterCommitTask.Result.Select(c => FireboltCommit.From(c, parents: loadParentsTask.Result)).ToSet().AsEnumerable());
 
 			if (parentFilters.Count != 0)
 			{
 				var filterParentsFunc = new Func<FireboltCommit, HashSet<FireboltCommit>>(c => filterParents(c, originalCommit));
 				reparentTask = reparentTask
-					.ContinueWith(t => filterCommitTask.Result.SelectMany(filterParentsFunc).ToSet());
+					.ContinueWith(t => filterCommitTask.Result.SelectMany(filterParentsFunc));
 			}
 
 			var writeTreesTask = reparentTask.ContinueWith(t => t.Result.Select(rewritten =>
@@ -106,7 +105,7 @@ namespace Firebolt
 				writeTreesTask = writeTreesTask.ContinueWith(t => t.Result.Where(rewritten =>
                 {
                     if (rewritten.CommitInfo.Parents.Count > 1)
-                        return true; // It's a merge, keep it
+                        return true;
                     if (rewritten.CommitInfo.Parents.Count == 1 && rewritten.Tree == rewritten.CommitInfo.Parents.First().Tree)
                         return false; // Skip unchanged
                     if (rewritten.CommitInfo.Parents.Count == 0 && rewritten.Tree.Count == 0)
@@ -130,7 +129,7 @@ namespace Firebolt
 			return writeCommitTasks;
 		}
 
-		private HashSet<FireboltCommit> filterCommit(FireboltCommit commit, Commit original)
+        private HashSet<FireboltCommit> filterCommit(FireboltCommit commit, Commit original)
 		{
 			IEnumerable<FireboltCommit> rewrittenCommits = new FireboltCommit[] { commit };
 			foreach (var f in commitFilters)
@@ -153,7 +152,7 @@ namespace Firebolt
 		}
 	}
 
-	class RewriteOptions
+	public class RewriteOptions
 	{
 		public bool PruneEmpty { get; }
 		public RewriteOptions(bool pruneEmpty = true)

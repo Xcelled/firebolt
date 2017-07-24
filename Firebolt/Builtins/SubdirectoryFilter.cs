@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using LibGit2Sharp;
+using Firebolt.Core;
 
 namespace Firebolt.Builtins
 {
