@@ -9,8 +9,8 @@ namespace Firebolt.Core
         IEnumerable<FireboltCommit> FilterCommit(FireboltCommit commit, Commit original, IRepository repo);
     }
 
-    public interface ICommitParentFilter
+    public interface IGraphFilter
     {
-        IEnumerable<FireboltCommit> FilterRewrittenParents(FireboltCommit commit, Commit original, IRepository repo);
+        void FilterRewrittenParents(GitGraph graph, IRepository repo);
     }
 }

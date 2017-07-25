@@ -59,39 +59,54 @@ namespace Firebolt.Core
         }
     }
 
-    public class FireboltCommit
+    public class FireboltCommit : IEquatable<FireboltCommit>
     {
         public Signature Author { get; }
         public Signature Committer { get; }
         public string Message { get; }
         public TreeMetadata Tree { get; }
-        public HashSet<Commit> Parents { get; }
 
-        public FireboltCommit(Signature author, Signature committer, string message, TreeMetadata tree, IEnumerable<Commit> parents)
+        public FireboltCommit(Signature author, Signature committer, string message, TreeMetadata tree)
         {
             this.Author = author;
             this.Committer = committer;
             this.Message = message;
             this.Tree = tree;
-            this.Parents = parents.ToSet();
         }
 
-        public static FireboltCommit From(Commit commit, Signature author = null, Signature committer = null, string message = null, TreeMetadata tree = null, IEnumerable<Commit> parents = null)
+        public static FireboltCommit From(Commit commit, Signature author = null, Signature committer = null, string message = null, TreeMetadata tree = null)
         {
             return new FireboltCommit(author ?? commit.Author,
                 committer ?? commit.Committer,
                 message ?? commit.Message,
-                tree ?? TreeMetadata.From(commit.Tree),
-                parents ?? commit.Parents);
+                tree ?? TreeMetadata.From(commit.Tree));
         }
 
-        public static FireboltCommit From(FireboltCommit commit, Signature author = null, Signature committer = null, string message = null, TreeMetadata tree = null, IEnumerable<Commit> parents = null)
+        public static FireboltCommit From(FireboltCommit commit, Signature author = null, Signature committer = null, string message = null, TreeMetadata tree = null)
         {
             return new FireboltCommit(author ?? commit.Author,
                 committer ?? commit.Committer,
                 message ?? commit.Message,
-                tree ?? commit.Tree,
-                parents ?? commit.Parents);
+                tree ?? commit.Tree);
+        }
+
+        public override int GetHashCode()
+        {
+            return Author.GetHashCode() + Committer.GetHashCode() + Message.GetHashCode() + Tree.GetHashCode();
+        }
+
+        public override bool Equals(object obj)
+        {
+            var casted = obj as FireboltCommit;
+            return casted != null ? Equals(casted) : false;
+        }
+
+        public bool Equals(FireboltCommit other)
+        {
+            return this.Author.Equals(other.Author) &&
+                this.Committer.Equals(other.Committer) &&
+                this.Message.Equals(other.Message, StringComparison.Ordinal)
+                && this.Tree.Equals(other.Tree);
         }
     }
 }

@@ -5,47 +5,55 @@ using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using QuickGraph;
+using QuickGraph.Algorithms;
 
-using CommitSet = System.Collections.Generic.HashSet<LibGit2Sharp.Commit>;
+using FireboltCommitSet = System.Collections.Generic.HashSet<Firebolt.Core.FireboltCommit>;
 
 namespace Firebolt.Core
 {
-	public class RewriteEngine
+    public class RewriteEngine
 	{
-		List<ICommitFilter> commitFilters;
-		List<ICommitParentFilter> parentFilters;
-		IRepository repository;
+        IRepository repository;
 		RewriteOptions options;
+        GitGraph commitsToRewrite, rewrittenCommits;
 
-		Dictionary<Commit, Task<CommitSet>> rewrittenCommits;
+        // Maps original commits to rewritten ones
+        Dictionary<FireboltCommit, Task<FireboltCommitSet>> commitMap;
+        // The tasks to do the rewriting
+        Dictionary<FireboltCommit, Task<Task<FireboltCommitSet>>> rewriterTasks;
 
-		public int Total => rewrittenCommits?.Count ?? 0;
-		public int Done => rewrittenCommits?.Values?.Count(t => t.IsCompleted) ?? 0;
+        public int Total => commitMap?.Count ?? 0;
+		public int Done => commitMap?.Values?.Count(t => t.IsCompleted) ?? 0;
 
-		public RewriteEngine(IRepository repo, IEnumerable<ICommitFilter> commitFilters, IEnumerable<ICommitParentFilter> parentFilters, RewriteOptions options)
+		public RewriteEngine(IRepository repo, GitGraph commits, RewriteOptions options)
 		{
 			repository = repo;
-			this.commitFilters = commitFilters.ToList();
-			this.parentFilters = parentFilters.ToList();
 			this.options = options;
+            commitsToRewrite = commits;
+            rewrittenCommits = new GitGraph();
+
+			// Prepare our rewriting tasks (but don't start them)
+            rewriterTasks = commitsToRewrite
+                .Vertices
+                .AsParallel()
+                .ToDictionary(c => c, c => new Task<Task<FireboltCommitSet>>(() => rewriteCommit(c)));
+
+            commitMap = rewriterTasks
+                .AsParallel()
+                .ToDictionary(e => e.Key, e => e.Value.Unwrap());
 		}
 
-		public Task<Dictionary<Commit, CommitSet>> Rewrite(CommitSet commits)
+		public async Task<object> Rewrite()
 		{
-			// Prepare our rewriting tasks (but don't start them)
-			var rewriterTasks = commits
-				.AsParallel()
-				.ToDictionary(c => c, c => new Task<Task<CommitSet>>(() => rewrite(c)));
-
-			// Unwrap the each rewriter task, giving us a dictionary commit -> Task<Rewritten Commit>
-			rewrittenCommits = rewriterTasks.AsParallel().ToDictionary(e => e.Key, e => e.Value.Unwrap());
-
 			// Now start our rewriters
 			Parallel.ForEach(rewriterTasks.Values, t => t.Start());
 
-			// When everything's been rewritten, return the results
-			return Task.WhenAll(rewrittenCommits.Values)
-				.ContinueWith(t => rewrittenCommits.AsParallel().ToDictionary(e => e.Key, e => e.Value.Result));
+            // Wait for all commits to be rewritten
+            await Task.WhenAll(commitMap.Values);
+
+            // When everything's been rewritten, return the results
+            return new { Graph = rewrittenCommits, Map = commitMap.AsParallel().ToDictionary(e => e.Key, e => e.Value.Result) };
 		}
 
 		private Task<CommitSet> getRewrittenOrOriginalParents(Commit commit)
@@ -73,6 +81,25 @@ namespace Firebolt.Core
 				return rewrittenCommits[commit];
 			else
 				return Task.FromResult(new CommitSet());
+		}
+
+        private FireboltCommitSet runCommitFilters(FireboltCommit original)
+        {
+            return null;
+        }
+
+        private async Task<FireboltCommitSet> rewriteCommit(FireboltCommit originalCommit)
+        {
+            var originalTreeMetadata = originalCommit.Tree;
+            var filterTask = Task.Run(() =>runCommitFilters(originalCommit));
+            var getParentsTask = getRewrittenOrOriginalParents(originalCommit);
+
+            var filteredCommits = await filterTask;
+            var parents = await getParentsTask;
+
+            var relationships = filteredCommits.SelectMany(c => parents.Select(p => new Parentage(c, p)));
+
+            rewrittenCommits.AddVerticesAndEdgeRange(relationships);
 		}
 
 		private Task<CommitSet> rewrite(Commit originalCommit)
@@ -152,44 +179,16 @@ namespace Firebolt.Core
 		}
 	}
 
-	public class RewriteOptions
-	{
-		public bool PruneEmpty { get; }
-		public RewriteOptions(bool pruneEmpty = true)
+    public class RewriteOptions
+    {
+        public bool PruneEmpty { get; }
+        public IReadOnlyList<ICommitFilter> CommitFilters { get; }
+        public IReadOnlyList<ICommitParentFilter> ParentFilters { get; }
+		public RewriteOptions(bool pruneEmpty = true, IEnumerable<ICommitFilter> commitFilters = null, IEnumerable<ICommitParentFilter> parentFilters = null)
 		{
 			this.PruneEmpty = pruneEmpty;
-		}
-	}
-
-	static class Extensions
-	{
-		public static Signature EnsureNonEmpty(this Signature sig, string defaultName = "Unknown", string defaultEmail = "Unknown")
-		{
-			var blankName = string.IsNullOrEmpty(sig.Name);
-			var blankEmail = string.IsNullOrEmpty(sig.Email);
-
-			if (!blankEmail && !blankName)
-			{
-				return sig;
-			}
-
-			return new Signature(blankName ? defaultName : sig.Name, blankEmail ? defaultEmail : sig.Email, sig.When);
-		}
-
-		public static HashSet<T> ToSet<T>(this IEnumerable<T> @enum)
-		{
-			var casted = @enum as HashSet<T>;
-			if (casted != null)
-			{
-				return casted;
-			}
-
-			return new HashSet<T>(@enum);
-		}
-
-		public static IEnumerable<T> Flatten<T>(this IEnumerable<IEnumerable<T>> @enum)
-		{
-			return Enumerable.SelectMany(@enum, x => x);
-		}
+            this.CommitFilters = commitFilters?.ToList() ?? new List<ICommitFilter>();
+            this.ParentFilters = parentFilters?.ToList() ?? new List<ICommitParentFilter>();
+        }
 	}
 }
