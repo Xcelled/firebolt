@@ -6,9 +6,9 @@ using System.Threading.Tasks;
 using LibGit2Sharp;
 using Firebolt.Core;
 
-namespace Firebolt.Builtins
+namespace Firebolt.Core.Builtins
 {
-    class SubdirectoryFilter : ICommitFilter
+    public class SubdirectoryFilter : ICommitFilter
     {
         private Dictionary<string, string> relocations;
         public SubdirectoryFilter(Dictionary<string, string> relocations)
@@ -16,8 +16,8 @@ namespace Firebolt.Builtins
             this.relocations = relocations;
         }
 
-		public IEnumerable<FireboltCommit> FilterCommit(FireboltCommit commit, Commit original, IRepository repo)
-		{
+        public bool FilterCommit(CommitMetadata commit, FilterContext context)
+        {
             var newTree = new TreeMetadata();
 
             foreach (var rel in relocations)
@@ -30,9 +30,13 @@ namespace Firebolt.Builtins
                 }
             }
 
-            if (newTree.EntryNames.Any()) {
-			    yield return FireboltCommit.From(commit, tree: newTree);                
+            if (newTree.IsEmpty)
+            {
+                return false;
             }
-		}
-	}
+
+            commit.Tree = newTree;
+            return true;
+        }
+    }
 }

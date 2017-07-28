@@ -58,12 +58,17 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Builtins\ReparentFilter.cs" />
+    <Compile Include="Builtins\SubdirectoryFilter.cs" />
     <Compile Include="Extensions.cs" />
-    <Compile Include="FireboltCommit.cs" />
+    <Compile Include="CommitMetadata.cs" />
+    <Compile Include="CommitMetadataRewriter.cs" />
+    <Compile Include="FilterContext.cs" />
     <Compile Include="GitGraph.cs" />
-    <Compile Include="ICommitFilter.cs" />
+    <Compile Include="GraphHelper.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="RewriteEngine.cs" />
+    <Compile Include="ParentRewriter.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

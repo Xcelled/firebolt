@@ -1,112 +1,97 @@
-﻿using LibGit2Sharp;
-using Mono.Options;
+﻿using Firebolt.Core;
+using LibGit2Sharp;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using Firebolt.Core;
 
 namespace Firebolt
 {
     class Firebolt
     {
-        static Tuple<string, string> parseSubdirectoryOption(string option)
+        private IRepository repo;
+        private FireboltOptions options;
+
+        public Firebolt(IRepository repo, FireboltOptions options)
         {
-            var parts = option.Split(new char[] { ':' }, 2);
-
-            var from = parts[0].Trim();
-            var to = parts.Length == 2 ? parts[1] : "";
-
-            return Tuple.Create(from, to);
+            this.repo = repo;
+            this.options = options;
         }
 
-        static void Main(string[] args)
+        public void Run()
         {
-            var showHelp = false;
-            var pruneEmpty = false;
-            var subdirectoryFilters = new List<Tuple<string, string>>();
-            var revListOptions = new List<string>();
+            // Main idea: we take a rev list like filter branch. Instead of trying to parse it ourselves,
+            // shell out to rev-list and load the resulting commits. Rewrite these in parallel
+            // Once we've done that, commit the rewritten commits. Then, shell out to git-rev-list with a list
+            // of the rewritten commits and the --simplify-merges flag. Git will give us back a tree with all
+            // the redundant stuff taken out. It's easier, faster, and more reliable to call git for this info
+            // rather than try to implement it ourselves. Once we have the history simplification,
+            // start the rewriter again but only to change the parents. Once that's done, persist the new commits
+            // and finally update any refs that changed.
 
-            var optionDefs = new OptionSet
-            {
-                { "prune-empty", "", v => pruneEmpty = v != null },
-                { "subdirectory-filter=", "", v => subdirectoryFilters.Add(parseSubdirectoryOption(v)) }
-            };
+            var headsToRewrite = Git.RevParse(options.RevListOptions.Concat("--no-flags", "--revs-only", "--symbolic-full-name", "--default", "HEAD"))
+                .Select(name => repo.Refs[name])
+                .Where(r => !r.IsRemoteTrackingBranch)
+                .ToList();
 
-            try
+            if (headsToRewrite.Count == 0)
             {
-                revListOptions = optionDefs.Parse(args);
-                if (revListOptions.Count == 0)
-                {
-                    throw new Exception("Must specify a branch name!");
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine(ex.Message);
-                showHelp = true;
+                throw new Exception("Found no heads to rewrite");
             }
 
-            if (showHelp)
+            var revsToRewrite = Git.RevParse(options.RevListOptions.Concat("--revs-only")).ToList();
+            var filteredRevListOptions = Git.RevParse(options.RevListOptions.Concat("--no-revs")).ToList();
+
+            var shasToRewrite = Git.RevList(filteredRevListOptions.Concat("--default", "HEAD"), revsToRewrite).ToSet();
+
+            if (shasToRewrite.Count == 0)
             {
-                Console.WriteLine("Usage: FireBolt [OPTIONS] [--] [rev-list options]");
-                Console.WriteLine();
-                Console.WriteLine("Options:");
-                optionDefs.WriteOptionDescriptions(Console.Out);
-                Environment.Exit(1);
+                throw new Exception("Found nothing to rewrite");
             }
 
-            var filters = new List<ICommitFilter>();
-            var limiters = new List<ICommitParentFilter>();
+            var rewritten = rewrite(shasToRewrite, options.Filters);
 
-            // Builtins
-            if (subdirectoryFilters.Any())
+            if (options.SimplifyMerges)
             {
-                var sdf = new Builtins.SubdirectoryFilter(subdirectoryFilters.ToDictionary(t => t.Item1, t => t.Item2));
-                filters.Add(sdf);
+                rewritten = simplifyMerges(revsToRewrite.Select(sha => rewritten[sha].Sha), filteredRevListOptions);
             }
 
-            using (var repo = new Repository(Environment.CurrentDirectory))
+            foreach (var head in headsToRewrite)
             {
-                Console.Write("Locating commits to rewrite... ");
-                var proc = Process.Start(new ProcessStartInfo("git", escape(new[] { "rev-list", "--default", "HEAD", "--simplify-merges" }.Concat(revListOptions)))
-                {
-                    RedirectStandardOutput = true,
-                    CreateNoWindow = true,
-                    UseShellExecute = false
-                });
-
-                var commitsToRewrite = new HashSet<Commit>();
-
-                proc.OutputDataReceived += (sender, e) => {
-                    if (!String.IsNullOrEmpty(e.Data))
-                    {
-                        commitsToRewrite.Add(repo.Lookup<Commit>(e.Data.Trim()));
-                    }
-                };
-                proc.BeginOutputReadLine();
-                proc.WaitForExit();
-
-                Console.WriteLine($"Found {commitsToRewrite.Count}");
-                Console.Write($"Locating refs to update...");
-                var refs = revListOptions.Select(x => repo.Refs["refs/heads/" + x]).ToList();
-                Console.WriteLine($"Found { refs.Count}");
-
-                var rewriter = new RewriteEngine(repo, filters, limiters, new RewriteOptions(pruneEmpty: pruneEmpty));
-
-                var results = runRewriter(repo, rewriter, commitsToRewrite);
-
-                foreach (var reference in refs)
-                {
-                    updateRef(repo, reference, results);
-                }
+                updateRef(head, rewritten);
             }
         }
 
-        private static void updateRef(Repository repo, Reference reference, Dictionary<Commit, HashSet<Commit>> rewrites)
+        private Dictionary<string, Commit> simplifyMerges(IEnumerable<string> rewrittenRevs, IEnumerable<string> filteredRevListOptions)
+        {
+            var shasToRewrite = Git.RevList(filteredRevListOptions.Concat("--default", "HEAD", "--parents", "--simplify-merges"), rewrittenRevs)
+                .Select(line => line.Split(' '))
+                .ToDictionary(arr => arr[0], arr => arr.Skip(1).ToArray().AsEnumerable());
+
+            var reparenter = new Filters(parentFilters: new[] { new Core.Builtins.ReparentFilter(shasToRewrite) });
+
+            return rewrite(shasToRewrite.Keys.ToSet(), reparenter);
+
+        }
+
+        private Dictionary<string, Commit> rewrite(ISet<string> shasToRewrite, Filters filters)
+        {
+            var commitMap = GraphHelper.LoadCommits(repo, shasToRewrite);
+            var graph = GraphHelper.LoadFromCommits(commitMap);
+
+            // rewrite
+            var rewriter = new RewriteEngine(graph, filters, commitMap, repo);
+            rewriter.Run();
+
+            var savedCommits = GraphHelper.Save(graph, repo);
+
+            // Now create a map from old SHA -> New SHA || null
+            return shasToRewrite
+                .ToDictionary(sha => sha, sha => savedCommits.ContainsKey(commitMap[sha]) ? savedCommits[commitMap[sha]] : null);
+        }
+
+        private void updateRef(Reference reference, Dictionary<string, Commit> rewritten)
         {
             var oldTip = reference.ResolveToDirectReference().Target.Sha;
             var firstAncestor = repo.Commits.QueryBy(new CommitFilter
@@ -114,26 +99,18 @@ namespace Firebolt
                 FirstParentOnly = false,
                 IncludeReachableFrom = oldTip,
                 SortBy = CommitSortStrategies.Topological
-            }).Where(c => rewrites.ContainsKey(c) && rewrites[c].Count != 0).FirstOrDefault();
+            })
+            .Where(c => rewritten.ContainsKey(c.Sha) && rewritten[c.Sha] != null)
+            .FirstOrDefault();
 
             if (firstAncestor == null)
             {
-                Console.WriteLine($"WARNING: CANNOT FIND REWRITTEN ANCESTOR FOR {reference.CanonicalName}");
+                Console.WriteLine($"{reference.CanonicalName} was deleted");
+                repo.Refs.Remove(reference);
                 return;
             }
 
-            HashSet<Commit> newTip = rewrites[firstAncestor];
-
-            if (newTip.Count != 1)
-            {
-                Console.WriteLine($"WARNING: {reference.CanonicalName} rewritten into multiple commits. Using the first:");
-                foreach (var c in newTip)
-                {
-                    Console.WriteLine($" - {c.Sha}");
-                }
-            }
-
-            var newCommit = newTip.First();
+            var newCommit = rewritten[firstAncestor.Sha];
 
             repo.Refs.UpdateTarget(reference.ResolveToDirectReference(), newCommit.Sha);
 
@@ -147,48 +124,13 @@ namespace Firebolt
                 Console.WriteLine($"WARNING: {reference.CanonicalName} unchanged");
             }
         }
+    }
 
-        private static Dictionary<Commit, HashSet<Commit>> runRewriter(Repository repo, RewriteEngine rewriter, HashSet<Commit> toRewrite)
-        {
-            Console.WriteLine("Rewriting commits...");
-            var overallTimer = new Stopwatch();
-
-            var resultsTask = Task.Run(() => rewriter.Rewrite(toRewrite));
-
-            overallTimer.Start();
-
-            while (resultsTask.Status != TaskStatus.RanToCompletion && resultsTask.Status != TaskStatus.Faulted)
-            {
-                System.Threading.Thread.Sleep(1000);
-                if (rewriter.Total == 0 || rewriter.Done == 0)
-                {
-                    continue;
-                }
-
-                var rate = rewriter.Done / overallTimer.Elapsed.TotalMilliseconds;
-
-                var totalTime = TimeSpan.FromMilliseconds(rewriter.Total / rate);
-
-                Console.Write($"\r{new string(' ', Console.WindowWidth-1)}\rRewrote {rewriter.Done} of {rewriter.Total} (est {totalTime - overallTimer.Elapsed} remaining)");
-            }
-
-            overallTimer.Stop();
-
-            Console.WriteLine();
-            Console.WriteLine($"Rewrote {rewriter.Done} of {rewriter.Total} in {overallTimer.Elapsed} ({rewriter.Total / (int)overallTimer.Elapsed.TotalSeconds} commits/s)");
-
-            var results = resultsTask.Result;
-            return results;
-        }
-
-        private static string escape(IEnumerable<string> args)
-        {
-            return string.Join(" ", args.Select(arg =>
-            {
-                var s = Regex.Replace(arg, @"(\\*)" + "\"", @"$1$1\" + "\"");
-                s = "\"" + Regex.Replace(s, @"(\\+)$", @"$1$1") + "\"";
-                return s;
-            }));
-        }
+    class FireboltOptions
+    {
+        public bool PruneEmpty { get; }
+        public bool SimplifyMerges { get; }
+        public IReadOnlyList<string> RevListOptions { get; }
+        public Filters Filters { get; }
     }
 }

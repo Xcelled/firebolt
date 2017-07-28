@@ -9,36 +9,38 @@ using LibGit2Sharp;
 
 namespace Firebolt.Core
 {
-    public sealed class Parentage : Edge<FireboltCommit>
+    public sealed class Parentage<TCommit> : Edge<TCommit>
     {
         // Git-centric renames
-		public FireboltCommit Child => Source;
-		public FireboltCommit Parent => Target;
-		public Parentage(FireboltCommit child, FireboltCommit parent) : base(child, parent)
+		public TCommit Child => Source;
+		public TCommit Parent => Target;
+		public Parentage(TCommit child, TCommit parent) : base(child, parent)
         {
         }
     }
 
-    public class GitGraph : BidirectionalGraph<FireboltCommit, Parentage>
+    public class GitGraph<TCommit> : BidirectionalGraph<TCommit, Parentage<TCommit>>
     {
         public GitGraph(): base(false)
         {
-
         }
 
-        public GitGraph(IEnumerable<Commit> commits)
+		public IEnumerable<TCommit> GetParents(TCommit commit) => OutEdges(commit).Select(e => e.Parent);
+		public IEnumerable<TCommit> GetChildren(TCommit commit) => InEdges(commit).Select(e => e.Child);
+        public bool IsRootCommit(TCommit commit) => GetParents(commit).Any() == false;
+
+        /// <summary>
+        /// Removes a commit, hooking its parents and children together
+        /// </summary>
+        /// <param name="commit"></param>
+        public void RemoveCommit(TCommit commit)
         {
-            // Convert commits into a DAG representation
-            var edges = commits.SelectMany(c =>
-            {
-                var child = FireboltCommit.From(c);
-                return c.Parents.Select(p => new Parentage(child, FireboltCommit.From(p)));
-            });
+            var parents = GetParents(commit);
+            var children = GetChildren(commit);
+            var newEdges = children.SelectMany(c => parents.Select(p => new Parentage<TCommit>(c, p)));
 
-            AddVerticesAndEdgeRange(edges);
-		}
-
-		public IEnumerable<FireboltCommit> GetParents(FireboltCommit commit) => OutEdges(commit).Select(e => e.Parent);
-		public IEnumerable<FireboltCommit> GetChildren(FireboltCommit commit) => InEdges(commit).Select(e => e.Child);
-	}
+            AddEdgeRange(newEdges);
+            RemoveVertex(commit);
+        }
+    }
 }
