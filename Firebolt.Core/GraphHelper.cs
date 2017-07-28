@@ -12,25 +12,24 @@ namespace Firebolt.Core
         public static GitGraph<CommitMetadata> LoadFromCommits(IDictionary<string, CommitMetadata> commits)
         {
             var graph = new GitGraph<CommitMetadata>();
-            graph.AddVertexRange(commits.Values);
 
-            // Now set up parentages
-            foreach (var commit in commits.Values)
-            {
-                foreach (var parent in commit.Original.Parents)
+            var edges = commits.Values
+                .AsParallel()
+                .SelectMany(commit => commit.Original.Parents.Select(parent =>
                 {
                     if (commits.ContainsKey(parent.Sha))
                     {
                         // It's in the set to rewrite
-                        graph.AddEdge(new Parentage<CommitMetadata>(commit, commits[parent.Sha]));
+                        return new Parentage<CommitMetadata>(commit, commits[parent.Sha]);
                     }
                     else
                     {
                         // This parent is a boundary parent
-                        graph.AddVerticesAndEdge(new Parentage<CommitMetadata>(commit, new BoundaryCommit(parent)));
+                        return new Parentage<CommitMetadata>(commit, new BoundaryCommit(parent));
                     }
-                }
-            }
+                }));
+
+            graph.AddVerticesAndEdgeRange(edges);
 
             return graph;
         }
@@ -83,6 +82,7 @@ namespace Firebolt.Core
                 // Already saved
                 return commit.Original;
             }
+
             var savedTreeTask = Task.Run(() => commit.Tree.Equals(commit.Original.Tree) ? commit.Original.Tree : repo.ObjectDatabase.CreateTree(commit.Tree));
             var parentsTask = graph.GetParents(commit).Select(p => savers[p]);
 

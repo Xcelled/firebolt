@@ -58,6 +58,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Builtins\PruneEmptyFilter.cs" />
     <Compile Include="Builtins\ReparentFilter.cs" />
     <Compile Include="Builtins\SubdirectoryFilter.cs" />
     <Compile Include="Extensions.cs" />

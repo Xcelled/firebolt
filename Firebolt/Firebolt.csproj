@@ -64,7 +64,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Firebolt.cs" />
-    <Compile Include="Main.cs" />
+    <Compile Include="Program.cs" />
     <Compile Include="Git.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

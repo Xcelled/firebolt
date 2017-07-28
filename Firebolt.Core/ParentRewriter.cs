@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Firebolt.Core
@@ -24,27 +25,76 @@ namespace Firebolt.Core
             this.graph = graph;
         }
 
-        public bool AddRelationship(CommitMetadata parent, CommitMetadata child) => graph.AddEdge(new Parentage<CommitMetadata>(child, parent));
-        public bool BreakRelationship(CommitMetadata parent, CommitMetadata child) => graph.RemoveEdge(new Parentage<CommitMetadata>(child, parent));
+        public CommitLock Lock(CommitMetadata commit)
+        {
+            return graph.Lock(commit);
+        }
+
+        public bool AddRelationship(CommitMetadata parent, CommitMetadata child)
+        {
+            var childLock = graph.GetSingleLock(child);
+            var parentLock = graph.GetSingleLock(parent);
+
+            childLock.EnterWriteLock();
+            try
+            {
+                parentLock.EnterWriteLock();
+                try
+                {
+                    return graph.AddEdge(new Parentage<CommitMetadata>(child, parent));
+                }
+                finally
+                {
+                    parentLock.ExitWriteLock();
+                }
+            }
+            finally
+            {
+                childLock.ExitWriteLock();
+            }
+        }
+        public bool BreakRelationship(CommitMetadata parent, CommitMetadata child)
+        {
+            var childLock = graph.GetSingleLock(child);
+            var parentLock = graph.GetSingleLock(parent);
+
+            childLock.EnterWriteLock();
+            try
+            {
+                parentLock.EnterWriteLock();
+                try
+                {
+                    return graph.RemoveEdge(new Parentage<CommitMetadata>(child, parent));
+                }
+                finally
+                {
+                    parentLock.ExitWriteLock();
+                }
+            }
+            finally
+            {
+                childLock.ExitWriteLock();
+            }
+        }
         public IEnumerable<CommitMetadata> GetParents(CommitMetadata commit) => graph.GetParents(commit);
         public Task<CommitMetadata[]> WaitForRewritten(IEnumerable<CommitMetadata> commits) => Task.WhenAll(commits.Select(p => parentRewriters[p]));
         public Task<CommitMetadata[]> WaitForRewritten(params CommitMetadata[] commits) => WaitForRewritten(commits);
 
         public async Task<CommitMetadata[]> WaitForRewrittenParents(CommitMetadata commit)
         {
-            while(true)
+            while (true)
             {
                 var parents = await WaitForRewritten(graph.GetParents(commit));
                 if (!parents.Contains(null))
                 {
                     return parents;
                 }
-                // Else one was remove, so get them again
+                // Else one was removed, so get them again
             }
         }
     }
 
-    // Rewrites commit metadata in isolation with no regard to parents or children. Highly parallelizable
+    // Rewrites commit parents. Fairly parallelizable
     class ParentRewriter
     {
         List<IParentFilter> filters;

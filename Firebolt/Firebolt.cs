@@ -30,20 +30,23 @@ namespace Firebolt
             // start the rewriter again but only to change the parents. Once that's done, persist the new commits
             // and finally update any refs that changed.
 
-            var headsToRewrite = Git.RevParse(options.RevListOptions.Concat("--no-flags", "--revs-only", "--symbolic-full-name", "--default", "HEAD"))
+            Console.Write("Finding refs to rewrite... ");
+            var headsToRewrite = Git.RevParse(new[] { "--no-flags", "--revs-only", "--symbolic-full-name", "--default", "HEAD" }.Concat(options.RevListOptions))
                 .Select(name => repo.Refs[name])
                 .Where(r => !r.IsRemoteTrackingBranch)
                 .ToList();
+
+            Console.WriteLine($"Found {headsToRewrite.Count}");
 
             if (headsToRewrite.Count == 0)
             {
                 throw new Exception("Found no heads to rewrite");
             }
 
-            var revsToRewrite = Git.RevParse(options.RevListOptions.Concat("--revs-only")).ToList();
-            var filteredRevListOptions = Git.RevParse(options.RevListOptions.Concat("--no-revs")).ToList();
+            var revsToRewrite = Git.RevParse("--revs-only".ConcatWith(options.RevListOptions)).ToList();
+            var filteredRevListOptions = Git.RevParse("--no-revs".ConcatWith(options.RevListOptions)).ToList();
 
-            var shasToRewrite = Git.RevList(filteredRevListOptions.Concat("--default", "HEAD"), revsToRewrite).ToSet();
+            var shasToRewrite = Git.RevList(new[] { "--default", "HEAD" }.Concat(filteredRevListOptions), revsToRewrite).ToSet();
 
             if (shasToRewrite.Count == 0)
             {
@@ -54,6 +57,7 @@ namespace Firebolt
 
             if (options.SimplifyMerges)
             {
+                Console.WriteLine("Simplifying merges");
                 rewritten = simplifyMerges(revsToRewrite.Select(sha => rewritten[sha].Sha), filteredRevListOptions);
             }
 
@@ -65,20 +69,23 @@ namespace Firebolt
 
         private Dictionary<string, Commit> simplifyMerges(IEnumerable<string> rewrittenRevs, IEnumerable<string> filteredRevListOptions)
         {
-            var shasToRewrite = Git.RevList(filteredRevListOptions.Concat("--default", "HEAD", "--parents", "--simplify-merges"), rewrittenRevs)
+            var shasToRewrite = Git.RevList(new[] { "--default", "HEAD", "--parents", "--simplify-merges" }.Concat(filteredRevListOptions), rewrittenRevs)
                 .Select(line => line.Split(' '))
                 .ToDictionary(arr => arr[0], arr => arr.Skip(1).ToArray().AsEnumerable());
 
             var reparenter = new Filters(parentFilters: new[] { new Core.Builtins.ReparentFilter(shasToRewrite) });
 
             return rewrite(shasToRewrite.Keys.ToSet(), reparenter);
-
         }
 
         private Dictionary<string, Commit> rewrite(ISet<string> shasToRewrite, Filters filters)
         {
+            Console.Write("Loading commits...");
             var commitMap = GraphHelper.LoadCommits(repo, shasToRewrite);
+            Console.WriteLine(commitMap.Count);
+            Console.Write("Loading commits into graph...");
             var graph = GraphHelper.LoadFromCommits(commitMap);
+            Console.WriteLine("Done");
 
             // rewrite
             var rewriter = new RewriteEngine(graph, filters, commitMap, repo);
@@ -128,9 +135,15 @@ namespace Firebolt
 
     class FireboltOptions
     {
-        public bool PruneEmpty { get; }
         public bool SimplifyMerges { get; }
         public IReadOnlyList<string> RevListOptions { get; }
         public Filters Filters { get; }
+
+        public FireboltOptions(Filters filters, IEnumerable<string> revListOptions, bool simplifyMerges)
+        {
+            this.Filters = filters;
+            this.RevListOptions = revListOptions.ToList();
+            this.SimplifyMerges = SimplifyMerges;
+        }
     }
 }

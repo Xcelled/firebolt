@@ -40,7 +40,7 @@ namespace Firebolt.Core
 
         public static IEnumerable<T> Concat<T>(this IEnumerable<T> @enum, params T[] items)
         {
-            return @enum.Concat(items);
+            return @enum.Concat(items.AsEnumerable());
         }
 
         public static IEnumerable<T> ConcatWith<T>(this T obj, IEnumerable<T> @enum)
