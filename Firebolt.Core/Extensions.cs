@@ -1,6 +1,4 @@
 ﻿using LibGit2Sharp;
-using QuickGraph;
-using QuickGraph.Algorithms;
 using System;
 using System.Collections.Generic;
 using System.Linq;

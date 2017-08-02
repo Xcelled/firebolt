@@ -3,9 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 using Firebolt.Core;
 
 namespace Firebolt
@@ -13,7 +11,7 @@ namespace Firebolt
     /// <summary>
     /// Shell helpers for calling out to Git for things that libgit can't quite do yet
     /// </summary>
-    static class Git
+    public static class Git
     {
         public static IEnumerable<string> RevParse(IEnumerable<string> args)
         {
@@ -57,6 +55,21 @@ namespace Firebolt
                 proc.StandardInput.WriteLine(line);
             }
             proc.StandardInput.Close();
+
+            foreach (var line in proc.StandardOutput.ReadLines())
+            {
+                yield return line;
+            }
+
+            proc.EnsureSuccessful();
+        }
+
+        public static IEnumerable<string> ShowBranch(IEnumerable<string> args)
+        {
+            var procInfo = GitStartInfo("show-branch", args);
+            procInfo.RedirectStandardOutput = true;
+
+            var proc = Process.Start(procInfo);
 
             foreach (var line in proc.StandardOutput.ReadLines())
             {

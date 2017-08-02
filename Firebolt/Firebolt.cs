@@ -3,8 +3,6 @@ using LibGit2Sharp;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Firebolt
 {
@@ -36,17 +34,20 @@ namespace Firebolt
                 .Where(r => !r.IsRemoteTrackingBranch)
                 .ToList();
 
-            Console.WriteLine($"Found {headsToRewrite.Count}");
+            Console.WriteLine($"{headsToRewrite.Count} ({string.Join(", ", headsToRewrite.Select(h => h.CanonicalName))})");
 
             if (headsToRewrite.Count == 0)
             {
                 throw new Exception("Found no heads to rewrite");
             }
 
+            Console.Write("Listing commits to rewrite...");
             var revsToRewrite = Git.RevParse("--revs-only".ConcatWith(options.RevListOptions)).ToList();
             var filteredRevListOptions = Git.RevParse("--no-revs".ConcatWith(options.RevListOptions)).ToList();
 
-            var shasToRewrite = Git.RevList(new[] { "--default", "HEAD" }.Concat(filteredRevListOptions), revsToRewrite).ToSet();
+            var shasToRewrite = Git.RevList(new[] { "--default", "HEAD", "--simplify-merges" }.Concat(filteredRevListOptions), revsToRewrite).ToSet();
+
+            Console.WriteLine(shasToRewrite.Count);
 
             if (shasToRewrite.Count == 0)
             {
@@ -55,11 +56,11 @@ namespace Firebolt
 
             var rewritten = rewrite(shasToRewrite, options.Filters);
 
-            if (options.SimplifyMerges)
-            {
-                Console.WriteLine("Simplifying merges");
-                rewritten = simplifyMerges(revsToRewrite.Select(sha => rewritten[sha].Sha), filteredRevListOptions);
-            }
+            //if (options.SimplifyMerges)
+            //{
+            //    Console.WriteLine("Simplifying merges");
+            //    rewritten = simplifyMerges(rewritten, filteredRevListOptions);
+            //}
 
             foreach (var head in headsToRewrite)
             {
@@ -67,35 +68,41 @@ namespace Firebolt
             }
         }
 
-        private Dictionary<string, Commit> simplifyMerges(IEnumerable<string> rewrittenRevs, IEnumerable<string> filteredRevListOptions)
+        private Dictionary<string, Commit> simplifyMerges(Dictionary<string, Commit> rewritten, IEnumerable<string> filteredRevListOptions)
         {
-            var shasToRewrite = Git.RevList(new[] { "--default", "HEAD", "--parents", "--simplify-merges" }.Concat(filteredRevListOptions), rewrittenRevs)
+            var rewrittenShas = rewritten.Values.Where(x => x != null).Select(x => x.Sha).ToSet();
+
+            var shasToRewrite = Git.RevList(new[] {"--parents", "--simplify-merges" }.Concat(rewrittenShas.First()), rewrittenShas.Skip(1))
                 .Select(line => line.Split(' '))
+                .Where(arr => rewrittenShas.Contains(arr[0]))
                 .ToDictionary(arr => arr[0], arr => arr.Skip(1).ToArray().AsEnumerable());
 
             var reparenter = new Filters(parentFilters: new[] { new Core.Builtins.ReparentFilter(shasToRewrite) });
 
-            return rewrite(shasToRewrite.Keys.ToSet(), reparenter);
+            var simplified = rewrite(shasToRewrite.Keys.ToSet(), reparenter);
+
+            // Now we need to build a new dictionary of old SHA -> simplified, by essentially doing a join op
+            return rewritten.Keys.ToDictionary(sha => sha, sha => simplified.ContainsKey(sha) ? simplified[sha] : rewritten[sha]);
         }
 
         private Dictionary<string, Commit> rewrite(ISet<string> shasToRewrite, Filters filters)
         {
-            Console.Write("Loading commits...");
-            var commitMap = GraphHelper.LoadCommits(repo, shasToRewrite);
-            Console.WriteLine(commitMap.Count);
-            Console.Write("Loading commits into graph...");
-            var graph = GraphHelper.LoadFromCommits(commitMap);
+            Console.WriteLine("Rewriting...");
+            var rewriter = new RewriteEngine(filters, repo);
+
+            var t = rewriter.Run(shasToRewrite);
+            do
+            {
+                System.Threading.Thread.Sleep(1000);
+                var progress = rewriter.Progress;
+                Console.Write($"\r{new string(' ', Console.WindowWidth - 1)}\rDone: {progress.Done}/{rewriter.Total}   Loaded: {progress.Loaded}   Filtered: {progress.Filtered}   Parented: {progress.ParentFiltered}   Dropped: {progress.Dropped}   Saved: {progress.Saved}");
+            }
+            while (!t.IsCompleted);
+
+            Console.WriteLine();
             Console.WriteLine("Done");
 
-            // rewrite
-            var rewriter = new RewriteEngine(graph, filters, commitMap, repo);
-            rewriter.Run();
-
-            var savedCommits = GraphHelper.Save(graph, repo);
-
-            // Now create a map from old SHA -> New SHA || null
-            return shasToRewrite
-                .ToDictionary(sha => sha, sha => savedCommits.ContainsKey(commitMap[sha]) ? savedCommits[commitMap[sha]] : null);
+            return t.Result;
         }
 
         private void updateRef(Reference reference, Dictionary<string, Commit> rewritten)
@@ -143,7 +150,7 @@ namespace Firebolt
         {
             this.Filters = filters;
             this.RevListOptions = revListOptions.ToList();
-            this.SimplifyMerges = SimplifyMerges;
+            this.SimplifyMerges = simplifyMerges;
         }
     }
 }

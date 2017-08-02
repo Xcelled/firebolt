@@ -2,13 +2,8 @@
 using Mono.Options;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
-using System.Text;
-using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 using Firebolt.Core;
-
 
 namespace Firebolt
 {
@@ -78,7 +73,8 @@ namespace Firebolt
             // Builtins
             if (subdirectoryFilters.Count != 0)
             {
-                metadataFilters.Add(new Core.Builtins.SubdirectoryFilter(subdirectoryFilters.ToDictionary(x => x.Item1, x => x.Item2)));
+                var sfd = new Core.Builtins.SubdirectoryFilter(subdirectoryFilters.ToDictionary(x => x.Item1, x => x.Item2));
+                metadataFilters.Add(sfd);
             }
             if (pruneEmpty)
             {

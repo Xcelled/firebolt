@@ -1,10 +1,7 @@
 using LibGit2Sharp;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Reflection;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Firebolt.Core
 {
@@ -79,12 +76,12 @@ namespace Firebolt.Core
 
     public class CommitMetadata : IEquatable<CommitMetadata>
     {
-        public virtual Signature Author { get; set; }
-        public virtual Signature Committer { get; set; }
-        public virtual string Message { get; set; }
-        public virtual TreeMetadata Tree { get; set; }
+        public Signature Author { get; set; }
+        public Signature Committer { get; set; }
+        public string Message { get; set; }
+        public TreeMetadata Tree { get; set; }
+        public List<Commit> Parents { get; set; }
         public Commit Original { get; }
-        public virtual bool IsBoundary => false;
 
         public CommitMetadata (Commit commit, Signature author = null, Signature committer = null, string message = null, TreeMetadata tree = null)
         {
@@ -110,36 +107,6 @@ namespace Firebolt.Core
                 this.Committer.Equals(other.Committer) &&
                 this.Message.Equals(other.Message, StringComparison.Ordinal) &&
                 this.Tree.Equals(other.Tree);
-        }
-    }
-
-    /// <summary>
-    /// Represents a boundary commit
-    /// </summary>
-    public class BoundaryCommit : CommitMetadata, IEquatable<Commit>
-    {
-        public override Signature Author { get => base.Author; set => throw new InvalidOperationException(); }
-        public override Signature Committer { get => base.Committer; set => throw new InvalidOperationException(); }
-        public override string Message { get => base.Message; set => throw new InvalidOperationException(); }
-        public override TreeMetadata Tree { get => base.Tree; set => throw new InvalidOperationException(); }
-        public override bool IsBoundary => true;
-
-        public BoundaryCommit(Commit commit) : base(commit)
-        { }
-
-        public override int GetHashCode()
-        {
-            return Original.GetHashCode();
-        }
-
-        public override bool Equals(object obj)
-        {
-            return Original.Equals(obj);
-        }
-
-        public bool Equals(Commit other)
-        {
-            return Original.Equals(other);
         }
     }
 }

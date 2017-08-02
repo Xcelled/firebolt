@@ -1,10 +1,8 @@
-﻿using System;
+﻿using LibGit2Sharp;
+using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
-using LibGit2Sharp;
-using Firebolt.Core;
 
 namespace Firebolt.Core.Builtins
 {
@@ -22,11 +20,11 @@ namespace Firebolt.Core.Builtins
 
             foreach (var rel in relocations)
             {
-                var subtree = commit.Tree[rel.Key];
+                TreeDefinition subtree = string.IsNullOrEmpty(rel.Key) ? (TreeDefinition)commit.Tree : commit.Tree[rel.Key];
 
                 if (subtree != null)
                 {
-                    newTree.Add(rel.Value, subtree);
+                    newTree.Add(stringrel.Value, subtree);
                 }
             }
 

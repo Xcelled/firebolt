@@ -1,7 +1,5 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 
 namespace Firebolt.Core.Builtins
@@ -17,22 +15,13 @@ namespace Firebolt.Core.Builtins
 
         public async Task<bool> FilterParents(CommitMetadata commit, ParentFilterContext context)
         {
-            var newParentsForCommit = newParents[commit.Original.Sha];
-            var existingParents = (await context.WaitForRewrittenParents(commit)).Select(c => c.Original.Sha);
-
-            var toRemove = existingParents.Except(newParentsForCommit).Select(context.Lookup);
-            var toAdd = newParentsForCommit.Except(existingParents).Select(context.Lookup);
-
-            foreach (var p in toRemove)
+            if (newParents.ContainsKey(commit.Original?.Sha))
             {
-                context.BreakRelationship(p, commit);
-            }
-            foreach (var p in toAdd)
-            {
-                context.AddRelationship(p, commit);
+                commit.Parents = (await Task.WhenAll(newParents[commit.Original?.Sha].Select(context.Map))).Flatten().ToList();
+                return true;
             }
 
-            return true;
+            return false;
         }
     }
 }
