@@ -9,32 +9,50 @@ namespace Firebolt.Core.Builtins
     public class PruneEmptyFilter : IParentFilter
     {
         private readonly bool pruneMerges;
-		private readonly bool pruneMergesAggressive;
+        private readonly bool pruneMergesAggressive;
 
         public PruneEmptyFilter(bool mergePruning, bool aggressiveMergePruning)
         {
-			pruneMerges = mergePruning;
-			pruneMergesAggressive = aggressiveMergePruning;
-		}
-		public async Task<bool> FilterParents(CommitMetadata commit, ParentFilterContext context)
+            pruneMerges = mergePruning;
+            pruneMergesAggressive = aggressiveMergePruning;
+        }
+        public async Task<bool> FilterParents(CommitMetadata commit, ParentFilterContext context)
         {
             // Re-process merges to eliminate branches that don't contribute anything to the tree
             if (commit.Parents.Count > 1 && pruneMergesAggressive)
             {
                 var treeSameTo = commit.Parents.Where(p => commit.Tree.Equals(p.Tree)).FirstOrDefault();
 
-                if (treeSameTo == null)
+                if (treeSameTo != null)
                 {
-                    // No parents were treesame, so there's actual content in this merge. Keep it.
-                    return true;
+                    // eliminate the parents that are not treesame as they contribute nothing
+                    commit.Parents = commit.Parents.Where(p => p.Tree.Equals(treeSameTo.Tree)).Distinct().ToList();
+
+                    // If it's demoted from a merge, it's a pointless commit now
+                    // as it's treesame to its only parent. So dump out early and drop it
+                    if (commit.Parents.Count == 1)
+                    {
+                        return false;
+                    }
                 }
+            }
 
-                // Else, eliminate the parents that are not treesame as they contribute nothing
-                commit.Parents = commit.Parents.Where(p => p.Tree.Equals(treeSameTo.Tree)).Distinct().ToList();
+            if (commit.Parents.Count == 2 && pruneMerges)
+            {
+                // Heuristic to quickly eliminate the common case of a triangle
+                var p1 = commit.Parents[0];
+                var p2 = commit.Parents[1];
 
-                // If it's demoted from a merge, it's a pointless commit now
-                // as it's treesame to its only parent. So dump out early and drop it
-                return commit.Parents.Count != 1;
+                if (p2.Parents.Contains(p1))
+                {
+                    // p1 is redundant as it's reachable from p2
+                    commit.Parents.Remove(p1);
+                }
+                else if (p1.Parents.Contains(p2))
+                {
+                    // p2 is redundant since reachable from p1
+                    commit.Parents.Remove(p2);
+                }
             }
 
             if (commit.Parents.Count > 1 && pruneMerges)
@@ -48,14 +66,14 @@ namespace Firebolt.Core.Builtins
 
                 using (var proc = await RunProcessAsync(procInfo).ConfigureAwait(false))
                 {
-                    var newParentShas = proc.StandardOutput.ReadToEnd().Split(' ', '\r', '\n').Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).Distinct();
+                    var newParentShas = proc.StandardOutput.ReadToEnd().Split(' ', '\r', '\n').Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).Distinct().ToSet();
 
                     if (proc.ExitCode != 0)
                     {
-						throw new Exception("git show-branch failed! " + proc.StandardError);
-					}
+                        throw new Exception("git show-branch failed! " + proc.StandardError.ReadToEnd());
+                    }
 
-                    commit.Parents = newParentShas.Select(context.Repo.Lookup<Commit>).ToList();
+                    commit.Parents = commit.Parents.Where(p => newParentShas.Contains(p.Sha)).ToList();
                 }
             }
 

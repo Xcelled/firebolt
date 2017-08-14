@@ -6,33 +6,20 @@ using System.Threading.Tasks;
 
 namespace Firebolt.Core.Builtins
 {
-	public class Relocation
-	{
-		public string From { get; }
-		public string To { get; }
-
-		public Relocation(string from, string to)
-		{
-			this.From = from;
-
-			// Special case of empty = move to same place
-			this.To = to == string.Empty ? from : to;
-		}
-	}
 	public class SubdirectoryFilter : ICommitFilter
 	{
-		private List<Relocation> relocations;
+		private IDictionary<string, string> relocations;
 
-		public SubdirectoryFilter(IEnumerable<Relocation> relocations)
+		public SubdirectoryFilter(IDictionary<string, string> relocations)
 		{
-			this.relocations = relocations.ToList();
+			this.relocations = relocations;
 
 			var seen = new HashSet<string>();
-            foreach (var rel in this.relocations)
+            foreach (var rel in this.relocations.Values)
             {
-                if (!seen.Add(rel.To))
+                if (!seen.Add(rel))
                 {
-					throw new Exception("Multiple relocations write to " + rel.To);
+					throw new Exception("Multiple relocations write to " + rel);
 				}
             }
 		}
@@ -43,29 +30,29 @@ namespace Firebolt.Core.Builtins
 
 			foreach (var rel in relocations)
 			{
-				if (string.IsNullOrEmpty(rel.From))
-				{
-					// Move whole tree under a subdir
-					throw new NotImplementedException();
-				}
-				else
-				{
-					var subtree = commit.Tree[rel.From];
+                if (rel.Key == null)
+                {
+                    // Move whole tree under a subdir
+                    throw new NotImplementedException();
+                }
+                else
+                {
+                    var subtree = commit.Tree[rel.Key];
 
 					if (subtree != null)
 					{
-						if (rel.To == null)
-						{
-							// Move tree under the root
-							throw new NotImplementedException();
-						}
-						else
-						{
-							newTree.Add(rel.To, subtree);
-						}
-					}
-				}
-			}
+                        if (rel.Key == null)
+                        {
+                            // Move tree under the root
+                            throw new NotImplementedException();
+                        }
+                        else
+                        {
+                            newTree.Add(rel.Value, subtree);
+                        }
+                    }
+                }
+            }
 
 			if (newTree.IsEmpty)
 			{
