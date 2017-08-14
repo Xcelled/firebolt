@@ -56,39 +56,16 @@ namespace Firebolt
 
             var rewritten = rewrite(shasToRewrite, options.Filters);
 
-            //if (options.SimplifyMerges)
-            //{
-            //    Console.WriteLine("Simplifying merges");
-            //    rewritten = simplifyMerges(rewritten, filteredRevListOptions);
-            //}
-
             foreach (var head in headsToRewrite)
             {
                 updateRef(head, rewritten);
             }
         }
 
-        private Dictionary<string, Commit> simplifyMerges(Dictionary<string, Commit> rewritten, IEnumerable<string> filteredRevListOptions)
-        {
-            var rewrittenShas = rewritten.Values.Where(x => x != null).Select(x => x.Sha).ToSet();
-
-            var shasToRewrite = Git.RevList(new[] {"--parents", "--simplify-merges" }.Concat(rewrittenShas.First()), rewrittenShas.Skip(1))
-                .Select(line => line.Split(' '))
-                .Where(arr => rewrittenShas.Contains(arr[0]))
-                .ToDictionary(arr => arr[0], arr => arr.Skip(1).ToArray().AsEnumerable());
-
-            var reparenter = new Filters(parentFilters: new[] { new Core.Builtins.ReparentFilter(shasToRewrite) });
-
-            var simplified = rewrite(shasToRewrite.Keys.ToSet(), reparenter);
-
-            // Now we need to build a new dictionary of old SHA -> simplified, by essentially doing a join op
-            return rewritten.Keys.ToDictionary(sha => sha, sha => simplified.ContainsKey(sha) ? simplified[sha] : rewritten[sha]);
-        }
-
         private Dictionary<string, Commit> rewrite(ISet<string> shasToRewrite, Filters filters)
         {
             Console.WriteLine("Rewriting...");
-            var rewriter = new RewriteEngine(filters, repo);
+            var rewriter = new RewriteEngine(filters, repo, options.PruneEmpty, options.PruneMerges, options.PruneMergesAggr);
 
             var t = rewriter.Run(shasToRewrite);
             do
@@ -142,15 +119,19 @@ namespace Firebolt
 
     class FireboltOptions
     {
-        public bool SimplifyMerges { get; }
         public IReadOnlyList<string> RevListOptions { get; }
         public Filters Filters { get; }
+        public bool PruneEmpty { get; internal set; }
+        public bool PruneMerges { get; internal set; }
+        public bool PruneMergesAggr { get; internal set; }
 
-        public FireboltOptions(Filters filters, IEnumerable<string> revListOptions, bool simplifyMerges)
+        public FireboltOptions(Filters filters, IEnumerable<string> revListOptions, bool pruneEmpty, bool pruneMerges, bool pruneMergesAggr)
         {
             this.Filters = filters;
             this.RevListOptions = revListOptions.ToList();
-            this.SimplifyMerges = simplifyMerges;
+            this.PruneEmpty = pruneEmpty;
+            this.PruneMerges = pruneMerges;
+            this.PruneMergesAggr = pruneMergesAggr;
         }
     }
 }

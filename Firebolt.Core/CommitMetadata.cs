@@ -1,6 +1,7 @@
 using LibGit2Sharp;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 
 namespace Firebolt.Core
@@ -23,6 +24,7 @@ namespace Firebolt.Core
         public bool Equals(TreeDefinition other)
         {
             var otherEntries = baseEntriesField.GetValue(other) as Dictionary<string, TreeEntryDefinition>;
+
             return entries.DictionaryEqual(otherEntries);
         }
 

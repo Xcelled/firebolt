@@ -50,11 +50,27 @@ namespace Firebolt.Core
             }
         }
 
-        public static bool DictionaryEqual<TKey, TValue>(this Dictionary<TKey, TValue> dict1, Dictionary<TKey, TValue> dict2)
-            where TKey: IEquatable<TKey>
+        public static bool DictionaryEqual<TKey, TValue>(this IDictionary<TKey, TValue> dict1, IDictionary<TKey, TValue> dict2)
+            where TKey : IEquatable<TKey>
             where TValue : IEquatable<TValue>
         {
-            return dict1.Count == dict2.Count && !dict1.Except(dict2).Any();
+            if (dict1 == dict2) return true;
+            if ((dict1 == null) || (dict2 == null)) return false;
+            if (dict1.Count != dict2.Count) return false;
+
+            foreach (var kvp in dict1)
+            {
+                if (!dict2.TryGetValue(kvp.Key, out TValue value2))
+                {
+                    return false;
+                }
+
+                if (!kvp.Value.Equals(value2))
+                {
+                    return false;
+                }
+            }
+            return true;
         }
     }
 }
